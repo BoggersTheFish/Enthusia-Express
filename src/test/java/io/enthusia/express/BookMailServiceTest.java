@@ -8,6 +8,7 @@ import io.enthusia.express.mail.*;
 import io.enthusia.express.util.*;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.OptionalLong;
 import org.bukkit.*;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
@@ -27,6 +28,7 @@ class BookMailServiceTest {
   BookMailService service;
   ItemStack book;
   BookMeta meta;
+  SoundFeedback sounds;
 
   @BeforeEach
   void setup() {
@@ -38,6 +40,7 @@ class BookMailServiceTest {
     target = mock(OfflinePlayer.class);
     config = new YamlConfiguration();
     when(plugin.getConfig()).thenReturn(config);
+    when(plugin.getLogger()).thenReturn(java.util.logging.Logger.getAnonymousLogger());
     when(player.hasPermission(anyString())).thenReturn(true);
     when(player.getUniqueId()).thenReturn(UUID.randomUUID());
     when(player.getName()).thenReturn("Sender");
@@ -54,7 +57,8 @@ class BookMailServiceTest {
     when(book.getItemMeta()).thenReturn(meta);
     when(meta.hasPages()).thenReturn(true);
     when(meta.getPageCount()).thenReturn(2);
-    service = new BookMailService(plugin, repository, combat, main);
+    sounds = mock(SoundFeedback.class);
+    service = new BookMailService(plugin, repository, combat, main, sounds);
   }
 
   @Test
@@ -62,13 +66,13 @@ class BookMailServiceTest {
     try (var codec = mockStatic(ItemCodec.class)) {
       byte[] bytes = {1, 2};
       codec.when(() -> ItemCodec.encode(book)).thenReturn(bytes);
-      when(repository.insertMail(
+      when(repository.insertMailLimited(
               any(), anyString(), any(), anyString(), any(), any(), anyInt(), anyBoolean()))
           .thenReturn(new CompletableFuture<>());
       service.send(player, target, false, false);
       service.send(player, target, false, false);
       verify(repository, times(1))
-          .insertMail(
+          .insertMailLimited(
               player.getUniqueId(),
               "Sender",
               target.getUniqueId(),
@@ -78,6 +82,71 @@ class BookMailServiceTest {
               0,
               false);
       verify(player.getInventory(), never()).setItemInMainHand(any());
+    }
+  }
+
+  @Test
+  void enabledLetterLimitUsesAtomicInsertAndRejectsWithoutSuccessFeedback() {
+    config.set("mail.limits.one-outstanding-letter-per-recipient", true);
+    try (var codec = mockStatic(ItemCodec.class)) {
+      codec.when(() -> ItemCodec.encode(book)).thenReturn(new byte[] {3});
+      when(repository.insertMailLimited(any(), anyString(), any(), anyString(), eq(MailType.LETTER), any(), eq(0), eq(true)))
+          .thenReturn(CompletableFuture.completedFuture(OptionalLong.empty()));
+      doAnswer(
+              invocation -> {
+                CompletableFuture<?> future = invocation.getArgument(0);
+                java.util.function.BiConsumer<Object, Throwable> callback = invocation.getArgument(1);
+                future.whenComplete(callback);
+                return null;
+              })
+          .when(main)
+          .complete(any(), any());
+      service.send(player, target, false, false);
+      verify(repository)
+          .insertMailLimited(any(), anyString(), any(), anyString(), eq(MailType.LETTER), any(), eq(0), eq(true));
+      verify(player).sendMessage(contains("outstanding-letter"));
+      verifyNoInteractions(sounds);
+    }
+  }
+
+  @Test
+  void letterSoundRequiresAcceptedPersistence() {
+    try (var codec = mockStatic(ItemCodec.class)) {
+      codec.when(() -> ItemCodec.encode(book)).thenReturn(new byte[] {4});
+      when(repository.insertMailLimited(any(), anyString(), any(), anyString(), eq(MailType.LETTER), any(), eq(0), eq(false)))
+          .thenReturn(CompletableFuture.completedFuture(OptionalLong.of(7)));
+      doAnswer(
+              invocation -> {
+                CompletableFuture<?> future = invocation.getArgument(0);
+                java.util.function.BiConsumer<Object, Throwable> callback = invocation.getArgument(1);
+                future.whenComplete(callback);
+                return null;
+              })
+          .when(main)
+          .complete(any(), any());
+      service.send(player, target, false, false);
+      verify(sounds).play(player, SoundFeedback.Cue.LETTER_SEND);
+    }
+  }
+
+  @Test
+  void failedLetterPersistenceProducesNoSuccessSound() {
+    try (var codec = mockStatic(ItemCodec.class)) {
+      codec.when(() -> ItemCodec.encode(book)).thenReturn(new byte[] {5});
+      when(repository.insertMailLimited(any(), anyString(), any(), anyString(), eq(MailType.LETTER), any(), eq(0), eq(false)))
+          .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("write failed")));
+      doAnswer(
+              invocation -> {
+                CompletableFuture<?> future = invocation.getArgument(0);
+                java.util.function.BiConsumer<Object, Throwable> callback = invocation.getArgument(1);
+                future.whenComplete(callback);
+                return null;
+              })
+          .when(main)
+          .complete(any(), any());
+      service.send(player, target, false, false);
+      verifyNoInteractions(sounds);
+      verify(player).sendMessage(contains("database-error"));
     }
   }
 

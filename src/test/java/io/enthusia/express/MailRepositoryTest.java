@@ -223,4 +223,161 @@ class MailRepositoryTest {
       assertTrue(pending.get(5, TimeUnit.SECONDS) > 0);
     }
   }
+
+  @Test
+  void packageLimitIsAtomicAcrossConnectionsAndResolvedStatesReleaseIt() {
+    MailRepository other = new MailRepository(null, file.toFile(), 5000);
+    other.initialize().join();
+    try {
+      var first =
+          repository.insertMailLimited(
+              sender, "S", recipient, "R", MailType.PACKAGE, new byte[] {1}, 1, true);
+      var second =
+          other.insertMailLimited(
+              sender, "S", recipient, "R", MailType.PACKAGE, new byte[] {2}, 1, true);
+      assertEquals(
+          1,
+          java.util.stream.Stream.of(first, second)
+              .map(CompletableFuture::join)
+              .filter(OptionalLong::isPresent)
+              .count());
+      long id = first.join().isPresent() ? first.join().getAsLong() : second.join().getAsLong();
+      assertTrue(repository.claim(id, recipient).join());
+      assertTrue(
+          repository
+              .insertMailLimited(
+                  sender, "S", recipient, "R", MailType.PACKAGE, new byte[] {3}, 1, true)
+              .join()
+              .isPresent());
+    } finally {
+      other.close();
+    }
+  }
+
+  @Test
+  void disabledLimitsAllowDuplicatesAndTypesAndRecipientsAreIndependent() {
+    UUID otherRecipient = UUID.randomUUID();
+    for (int i = 0; i < 2; i++)
+      assertTrue(
+          repository
+              .insertMailLimited(
+                  sender, "S", recipient, "R", MailType.PACKAGE, new byte[] {1}, 1, false)
+              .join()
+              .isPresent());
+    assertTrue(
+        repository
+            .insertMailLimited(
+                sender, "S", recipient, "R", MailType.LETTER, new byte[] {2}, 0, true)
+            .join()
+            .isPresent());
+    assertTrue(
+        repository
+            .insertMailLimited(
+                sender, "S", otherRecipient, "Other", MailType.PACKAGE, new byte[] {3}, 1, true)
+            .join()
+            .isPresent());
+  }
+
+  @Test
+  void unreadLetterBlocksButReadRetainedHistoryAndAnnouncementsDoNot() {
+    OptionalLong first =
+        repository
+            .insertMailLimited(
+                sender, "S", recipient, "R", MailType.LETTER, new byte[] {1}, 0, true)
+            .join();
+    assertTrue(first.isPresent());
+    assertTrue(
+        repository
+            .insertMailLimited(
+                sender, "S", recipient, "R", MailType.LETTER, new byte[] {2}, 0, true)
+            .join()
+            .isEmpty());
+    repository
+        .insertMail(
+            sender, "S", recipient, "R", MailType.ANNOUNCEMENT, new byte[] {8}, 0, false)
+        .join();
+    assertTrue(repository.markRead(first.getAsLong(), recipient).join());
+    assertTrue(
+        repository
+            .insertMailLimited(
+                sender, "S", recipient, "R", MailType.LETTER, new byte[] {3}, 0, true)
+            .join()
+            .isPresent());
+  }
+
+  @Test
+  void pendingSummaryExcludesClaimedReadAndPurgedHistory() {
+    long packageId = insert();
+    long claimed = insert();
+    assertTrue(repository.claim(claimed, recipient).join());
+    long letter =
+        repository
+            .insertMail(
+                sender, "S", recipient, "R", MailType.LETTER, new byte[] {1}, 0, false)
+            .join();
+    repository.markRead(letter, recipient).join();
+    repository
+        .insertMail(
+            sender, "S", recipient, "R", MailType.LETTER, new byte[] {2}, 0, false)
+        .join();
+    repository
+        .insertMail(
+            sender, "S", recipient, "R", MailType.ANNOUNCEMENT, new byte[] {3}, 0, false)
+        .join();
+    MailSummary summary = repository.pendingMail(recipient).join();
+    assertEquals(new MailSummary(1, 1, 1), summary);
+    assertNotNull(repository.get(packageId).join());
+  }
+
+  @Test
+  void returnedReturnClaimedAndPurgedPackagesDoNotBlockOriginalPair() {
+    OptionalLong original =
+        repository
+            .insertMailLimited(
+                sender, "S", recipient, "R", MailType.PACKAGE, new byte[] {1}, 1, true)
+            .join();
+    assertTrue(original.isPresent());
+    repository.expire(System.currentTimeMillis(), Long.MAX_VALUE, 0, 0).join();
+    assertEquals(MailStatus.RETURNED, repository.get(original.getAsLong()).join().status());
+    assertTrue(
+        repository
+            .insertMailLimited(
+                sender, "S", recipient, "R", MailType.PACKAGE, new byte[] {2}, 1, true)
+            .join()
+            .isPresent());
+    assertTrue(repository.claim(original.getAsLong(), sender).join());
+    assertEquals(MailStatus.RETURN_CLAIMED, repository.get(original.getAsLong()).join().status());
+    repository.expire(System.currentTimeMillis(), Long.MAX_VALUE, Long.MAX_VALUE, 0).join();
+    assertEquals(MailStatus.RETURN_CLAIMED, repository.get(original.getAsLong()).join().status());
+
+    UUID anotherSender = UUID.randomUUID();
+    UUID anotherRecipient = UUID.randomUUID();
+    long purged =
+        repository
+            .insertPackage(
+                anotherSender,
+                "Other sender",
+                anotherRecipient,
+                "Other recipient",
+                new byte[] {4},
+                1,
+                false)
+            .join();
+    repository.expire(System.currentTimeMillis(), Long.MAX_VALUE, 0, 0).join();
+    repository.expire(System.currentTimeMillis(), Long.MAX_VALUE, Long.MAX_VALUE, 0).join();
+    assertEquals(MailStatus.PURGED, repository.get(purged).join().status());
+    assertTrue(
+        repository
+            .insertMailLimited(
+                anotherSender,
+                "Other sender",
+                anotherRecipient,
+                "Other recipient",
+                MailType.PACKAGE,
+                new byte[] {5},
+                1,
+                true)
+            .join()
+            .isPresent());
+  }
 }

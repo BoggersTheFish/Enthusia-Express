@@ -5,6 +5,8 @@ import io.enthusia.express.hook.CombatLogXHook;
 import io.enthusia.express.util.ContainerScanner;
 import io.enthusia.express.util.ItemCodec;
 import io.enthusia.express.util.Text;
+import io.enthusia.express.util.SoundFeedback;
+import io.enthusia.express.util.SoundFeedback.Cue;
 import java.util.*;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
@@ -13,6 +15,8 @@ import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.NamespacedKey;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class ShippingService {
@@ -27,16 +31,29 @@ public final class ShippingService {
   private final MailRepository repository;
   private final CombatLogXHook combatHook;
   private final Map<UUID, UUID> targets = new HashMap<>();
+  private final SoundFeedback sounds;
+  private final NamespacedKey placeholderKey;
 
   public ShippingService(
       JavaPlugin plugin,
       MailRepository repository,
       CombatLogXHook combatHook,
       io.enthusia.express.util.MainThread main) {
+    this(plugin, repository, combatHook, main, new SoundFeedback(plugin));
+  }
+
+  public ShippingService(
+      JavaPlugin plugin,
+      MailRepository repository,
+      CombatLogXHook combatHook,
+      io.enthusia.express.util.MainThread main,
+      SoundFeedback sounds) {
     this.main = main;
     this.plugin = plugin;
     this.repository = repository;
     this.combatHook = combatHook;
+    this.sounds = sounds;
+    this.placeholderKey = new NamespacedKey("enthusiaexpress", "shipping-placeholder");
   }
 
   public void open(Player sender, OfflinePlayer target) {
@@ -66,6 +83,7 @@ public final class ShippingService {
     Inventory inv = Bukkit.createInventory(null, 27, TITLE_PREFIX + target.getName());
     inv.setItem(CANCEL_SLOT, button(Material.BARRIER, "\u00a7cCancel"));
     inv.setItem(CONFIRM_SLOT, button(Material.LIME_CONCRETE, "\u00a7aConfirm shipment"));
+    refreshPlaceholder(inv);
     inventories.put(sender.getUniqueId(), inv);
     sender.openInventory(inv);
   }
@@ -118,6 +136,7 @@ public final class ShippingService {
       return;
     }
     ItemStack packageItem = inv.getItem(PACKAGE_SLOT);
+    if (isPlaceholder(packageItem)) packageItem = null;
     if (!ContainerScanner.isAllowedShippingContainer(packageItem)) {
       sender.sendMessage(Text.msg(plugin.getConfig(), "invalid-container"));
       return;
@@ -166,9 +185,18 @@ public final class ShippingService {
     String targetName = Optional.ofNullable(target.getName()).orElse(targetId.toString());
     pending.add(sender.getUniqueId());
     main.complete(
-        repository.insertPackage(
-            sender.getUniqueId(), sender.getName(), targetId, targetName, payload, count, false),
-        (id, error) -> {
+        repository.insertMailLimited(
+            sender.getUniqueId(),
+            sender.getName(),
+            targetId,
+            targetName,
+            io.enthusia.express.mail.MailType.PACKAGE,
+            payload,
+            count,
+            plugin
+                .getConfig()
+                .getBoolean("mail.limits.one-outstanding-package-per-recipient", false)),
+        (result, error) -> {
           pending.remove(sender.getUniqueId());
           if (error != null) {
             // Compensate on the server thread; use the current session after a reconnect.
@@ -180,6 +208,14 @@ public final class ShippingService {
             if (!refundTarget.isOnline()) refundTarget.saveData();
             sender.sendMessage("\u00a7cShipment failed; your package and fee were refunded.");
             plugin.getLogger().severe("Package insert failed: " + error.getMessage());
+          } else if (result.isEmpty()) {
+            Player refundTarget =
+                Optional.ofNullable(Bukkit.getPlayer(sender.getUniqueId())).orElse(sender);
+            give(refundTarget, payloadItem);
+            for (int remaining = cost; remaining > 0; remaining -= Math.min(64, remaining))
+              give(refundTarget, new ItemStack(Material.RAW_GOLD, Math.min(64, remaining)));
+            if (!refundTarget.isOnline()) refundTarget.saveData();
+            sender.sendMessage(Text.msg(plugin.getConfig(), "outstanding-package"));
           } else {
             sender.sendMessage(
                 Text.msg(
@@ -192,6 +228,7 @@ public final class ShippingService {
                         String.valueOf(cost),
                         "items",
                         String.valueOf(count))));
+            sounds.play(sender, Cue.PACKAGE_SEND);
           }
         });
   }
@@ -199,7 +236,7 @@ public final class ShippingService {
   public void returnPackageOnClose(Player player, Inventory inv) {
     if (!owns(player, inv)) return;
     ItemStack stack = inv.getItem(PACKAGE_SLOT);
-    if (stack != null && !stack.getType().isAir()) {
+    if (stack != null && !isPlaceholder(stack) && !stack.getType().isAir()) {
       inv.setItem(PACKAGE_SLOT, null);
       Map<Integer, ItemStack> overflow = player.getInventory().addItem(stack);
       overflow
@@ -208,6 +245,27 @@ public final class ShippingService {
     }
     targets.remove(player.getUniqueId());
     inventories.remove(player.getUniqueId());
+  }
+
+  public void deferPlaceholderRefresh(Player player, Inventory inventory) {
+    Bukkit.getScheduler()
+        .runTask(
+            plugin,
+            () -> {
+              if (owns(player, inventory)) refreshPlaceholder(inventory);
+            });
+  }
+
+  public void refreshPlaceholder(Inventory inventory) {
+    ItemStack current = inventory.getItem(PACKAGE_SLOT);
+    if (current == null || current.getType().isAir()) inventory.setItem(PACKAGE_SLOT, placeholder());
+  }
+
+  public boolean isPlaceholder(ItemStack item) {
+    if (item == null || item.getType() != Material.GRAY_STAINED_GLASS_PANE) return false;
+    ItemMeta meta = item.getItemMeta();
+    return meta != null
+        && meta.getPersistentDataContainer().has(placeholderKey, PersistentDataType.BYTE);
   }
 
   public void shutdown() {
@@ -227,6 +285,16 @@ public final class ShippingService {
     ItemStack stack = new ItemStack(material);
     ItemMeta meta = stack.getItemMeta();
     meta.setDisplayName(name);
+    stack.setItemMeta(meta);
+    return stack;
+  }
+
+  private ItemStack placeholder() {
+    ItemStack stack = new ItemStack(Material.GRAY_STAINED_GLASS_PANE);
+    ItemMeta meta = stack.getItemMeta();
+    meta.setDisplayName("\u00a77Place package here");
+    meta.setLore(List.of("\u00a77Accepted: Shulker Boxes and Bundles"));
+    meta.getPersistentDataContainer().set(placeholderKey, PersistentDataType.BYTE, (byte) 1);
     stack.setItemMeta(meta);
     return stack;
   }

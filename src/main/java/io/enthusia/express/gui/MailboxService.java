@@ -18,6 +18,7 @@ public final class MailboxService {
   private final MailRepository repository;
   private final CombatLogXHook combatHook;
   private final MainThread main;
+  private final SoundFeedback sounds;
   private final Map<UUID, Session> sessions = new HashMap<>();
   private final Set<UUID> claiming = new HashSet<>();
   private boolean stopping;
@@ -38,10 +39,20 @@ public final class MailboxService {
 
   public MailboxService(
       JavaPlugin plugin, MailRepository repository, CombatLogXHook combatHook, MainThread main) {
+    this(plugin, repository, combatHook, main, new SoundFeedback(plugin));
+  }
+
+  public MailboxService(
+      JavaPlugin plugin,
+      MailRepository repository,
+      CombatLogXHook combatHook,
+      MainThread main,
+      SoundFeedback sounds) {
     this.plugin = plugin;
     this.repository = repository;
     this.combatHook = combatHook;
     this.main = main;
+    this.sounds = sounds;
   }
 
   private boolean allowed(Player player) {
@@ -191,13 +202,15 @@ public final class MailboxService {
               main.complete(
                   repository.markRead(record.id(), player.getUniqueId()),
                   (ok, failure) -> {
+                    claiming.remove(player.getUniqueId());
                     if (failure != null)
                       plugin.getLogger().warning("Cannot mark mail read: " + failure);
+                    else if (Boolean.TRUE.equals(ok) && record.type() == MailType.LETTER)
+                      sounds.play(player, SoundFeedback.Cue.LETTER_OPEN);
                   });
             } catch (RuntimeException e) {
-              player.sendMessage("\u00a7cThis book could not be opened.");
-            } finally {
               claiming.remove(player.getUniqueId());
+              player.sendMessage("\u00a7cThis book could not be opened.");
             }
           }
         });
@@ -240,6 +253,7 @@ public final class MailboxService {
               .forEach(item -> player.getWorld().dropItemNaturally(player.getLocation(), item));
           claiming.remove(player.getUniqueId());
           player.sendMessage("\u00a7aPackage claimed.");
+          sounds.play(player, SoundFeedback.Cue.PACKAGE_CLAIM);
           if (owns(player)) open(player, MailType.PACKAGE);
         });
   }

@@ -7,7 +7,14 @@ public final class ConfigValidation {
 
   public static void validate(FileConfiguration config) {
     for (String key :
-        java.util.List.of("mail.require-combatlogx", "letters.enabled", "announcements.enabled")) {
+        java.util.List.of(
+            "mail.require-combatlogx",
+            "mail.limits.one-outstanding-package-per-recipient",
+            "mail.limits.one-outstanding-letter-per-recipient",
+            "letters.enabled",
+            "announcements.enabled",
+            "notifications.join-mail.enabled",
+            "sounds.enabled")) {
       if (config.contains(key) && !config.isBoolean(key))
         throw new IllegalArgumentException(key + " must be true or false");
     }

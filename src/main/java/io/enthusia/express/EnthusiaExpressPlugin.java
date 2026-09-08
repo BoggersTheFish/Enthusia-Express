@@ -7,6 +7,8 @@ import io.enthusia.express.gui.MailboxService;
 import io.enthusia.express.gui.ShippingService;
 import io.enthusia.express.hook.CombatLogXHook;
 import io.enthusia.express.mail.ExpirationService;
+import io.enthusia.express.mail.JoinNotificationService;
+import io.enthusia.express.util.SoundFeedback;
 import java.io.File;
 import java.util.Objects;
 import org.bukkit.Bukkit;
@@ -29,8 +31,10 @@ public final class EnthusiaExpressPlugin extends JavaPlugin {
     this.repository = new MailRepository(this, dbFile);
     repository.initialize().join();
     this.combatHook = new CombatLogXHook(this);
-    this.shippingService = new ShippingService(this, repository, combatHook, main);
-    this.mailboxService = new MailboxService(this, repository, combatHook, main);
+    SoundFeedback sounds = new SoundFeedback(this);
+    sounds.validate();
+    this.shippingService = new ShippingService(this, repository, combatHook, main, sounds);
+    this.mailboxService = new MailboxService(this, repository, combatHook, main, sounds);
     this.expirationService = new ExpirationService(this, repository);
     MailCommand command =
         new MailCommand(
@@ -38,11 +42,14 @@ public final class EnthusiaExpressPlugin extends JavaPlugin {
             shippingService,
             mailboxService,
             combatHook,
-            new io.enthusia.express.mail.BookMailService(this, repository, combatHook, main));
+            new io.enthusia.express.mail.BookMailService(
+                this, repository, combatHook, main, sounds));
     Objects.requireNonNull(getCommand("mail")).setExecutor(command);
     Objects.requireNonNull(getCommand("mail")).setTabCompleter(command);
     Bukkit.getPluginManager()
         .registerEvents(new GuiListener(shippingService, mailboxService), this);
+    Bukkit.getPluginManager()
+        .registerEvents(new JoinNotificationService(this, repository, main), this);
     expirationService.start();
     getLogger().info("Enthusia Express enabled.");
   }

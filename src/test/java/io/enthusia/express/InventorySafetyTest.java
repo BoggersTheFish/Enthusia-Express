@@ -11,6 +11,9 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.*;
 import org.bukkit.inventory.*;
 import org.bukkit.inventory.meta.BundleMeta;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
 import org.junit.jupiter.api.Test;
 
 class InventorySafetyTest {
@@ -151,5 +154,65 @@ class InventorySafetyTest {
     when(mailbox.owns(player)).thenReturn(true);
     listener.onDrag(event);
     verify(event).setCancelled(true);
+  }
+
+  @Test
+  void placeholderCannotBePickedUpAndRealCargoTriggersRestorationCheck() {
+    ShippingService shipping = mock(ShippingService.class);
+    MailboxService mailbox = mock(MailboxService.class);
+    GuiListener listener = new GuiListener(shipping, mailbox);
+    Player player = mock(Player.class);
+    Inventory top = mock(Inventory.class);
+    when(top.getSize()).thenReturn(27);
+    InventoryView view = mock(InventoryView.class);
+    when(view.getTopInventory()).thenReturn(top);
+    when(shipping.owns(player, top)).thenReturn(true);
+    ItemStack placeholder = item(Material.GRAY_STAINED_GLASS_PANE, 1);
+    ItemStack cargo = item(Material.BUNDLE, 1);
+    when(cargo.clone()).thenReturn(cargo);
+    when(shipping.isPlaceholder(placeholder)).thenReturn(true);
+
+    InventoryClickEvent place = mock(InventoryClickEvent.class);
+    when(place.getWhoClicked()).thenReturn(player);
+    when(place.getView()).thenReturn(view);
+    when(place.getRawSlot()).thenReturn(ShippingService.PACKAGE_SLOT);
+    when(place.getClick()).thenReturn(ClickType.LEFT);
+    when(place.getCurrentItem()).thenReturn(placeholder);
+    when(place.getCursor()).thenReturn(cargo);
+    listener.onClick(place);
+    verify(place).setCancelled(true);
+    verify(top).setItem(ShippingService.PACKAGE_SLOT, cargo);
+    verify(place).setCursor(null);
+
+    InventoryClickEvent remove = mock(InventoryClickEvent.class);
+    when(remove.getWhoClicked()).thenReturn(player);
+    when(remove.getView()).thenReturn(view);
+    when(remove.getRawSlot()).thenReturn(ShippingService.PACKAGE_SLOT);
+    when(remove.getClick()).thenReturn(ClickType.RIGHT);
+    when(remove.getCurrentItem()).thenReturn(cargo);
+    listener.onClick(remove);
+    verify(remove).setCancelled(false);
+    verify(shipping).deferPlaceholderRefresh(player, top);
+  }
+
+  @Test
+  void placeholderIdentityRequiresPrivatePersistentMarker() {
+    org.bukkit.plugin.java.JavaPlugin plugin = mock(org.bukkit.plugin.java.JavaPlugin.class);
+    when(plugin.getName()).thenReturn("EnthusiaExpress");
+    ShippingService service =
+        new ShippingService(
+            plugin,
+            mock(io.enthusia.express.db.MailRepository.class),
+            mock(io.enthusia.express.hook.CombatLogXHook.class),
+            mock(io.enthusia.express.util.MainThread.class));
+    ItemStack pane = mock(ItemStack.class);
+    ItemMeta meta = mock(ItemMeta.class);
+    PersistentDataContainer pdc = mock(PersistentDataContainer.class);
+    when(pane.getType()).thenReturn(Material.GRAY_STAINED_GLASS_PANE);
+    when(pane.getItemMeta()).thenReturn(meta);
+    when(meta.getPersistentDataContainer()).thenReturn(pdc);
+    when(pdc.has(any(), eq(PersistentDataType.BYTE))).thenReturn(false, true);
+    assertFalse(service.isPlaceholder(pane));
+    assertTrue(service.isPlaceholder(pane));
   }
 }

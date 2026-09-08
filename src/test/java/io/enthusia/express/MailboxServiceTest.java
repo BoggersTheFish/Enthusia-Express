@@ -29,6 +29,7 @@ class MailboxServiceTest {
   Inventory top;
   InventoryView view;
   MailboxService service;
+  SoundFeedback sounds;
   UUID id;
   MockedStatic<Bukkit> bukkit;
   MockedStatic<ItemCodec> codec;
@@ -75,7 +76,8 @@ class MailboxServiceTest {
             })
         .when(main)
         .complete(any(), any());
-    service = new MailboxService(plugin, repository, combat, main);
+    sounds = mock(SoundFeedback.class);
+    service = new MailboxService(plugin, repository, combat, main, sounds);
   }
 
   void drain() {
@@ -126,6 +128,48 @@ class MailboxServiceTest {
     verify(player).openBook(book);
     verify(repository).markRead(1, id);
     verify(repository, never()).claim(anyLong(), any());
+    verify(sounds).play(player, SoundFeedback.Cue.LETTER_OPEN);
+  }
+
+  @Test
+  void rejectedReadDoesNotProduceSuccessSound() {
+    MailRecord record = record(MailType.LETTER);
+    ItemStack book = mock(ItemStack.class);
+    codec.when(() -> ItemCodec.decode(record.payload())).thenReturn(book);
+    when(repository.markRead(1, id)).thenReturn(CompletableFuture.completedFuture(false));
+    open(record);
+    service.click(player, 9);
+    drain();
+    verify(player).openBook(book);
+    verifyNoInteractions(sounds);
+  }
+
+  @Test
+  void successfulPackageDeliveryProducesClaimSound() {
+    MailRecord record = record(MailType.PACKAGE);
+    ItemStack stack = mock(ItemStack.class);
+    when(stack.getItemMeta()).thenReturn(mock(ItemMeta.class));
+    codec.when(() -> ItemCodec.decode(record.payload())).thenReturn(stack);
+    when(repository.claim(1, id)).thenReturn(CompletableFuture.completedFuture(true));
+    when(inventory.addItem(stack)).thenReturn(new HashMap<>());
+    open(record);
+    service.click(player, 9);
+    drain();
+    verify(sounds).play(player, SoundFeedback.Cue.PACKAGE_CLAIM);
+  }
+
+  @Test
+  void failedClaimProducesNoSuccessSound() {
+    MailRecord record = record(MailType.PACKAGE);
+    ItemStack stack = mock(ItemStack.class);
+    when(stack.getItemMeta()).thenReturn(mock(ItemMeta.class));
+    codec.when(() -> ItemCodec.decode(record.payload())).thenReturn(stack);
+    when(repository.claim(1, id)).thenReturn(CompletableFuture.completedFuture(false));
+    open(record);
+    service.click(player, 9);
+    drain();
+    verifyNoInteractions(sounds);
+    verify(inventory, never()).addItem(any(ItemStack.class));
   }
 
   @Test

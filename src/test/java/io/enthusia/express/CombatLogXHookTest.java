@@ -6,6 +6,8 @@ import static org.mockito.Mockito.*;
 import io.enthusia.express.hook.CombatLogXHook;
 import io.enthusia.express.util.ConfigValidation;
 import java.util.logging.Logger;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import org.bukkit.Server;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
@@ -112,6 +114,22 @@ class CombatLogXHookTest {
     assertThrows(IllegalArgumentException.class, () -> ConfigValidation.validate(config));
     config.set("mail.raw-gold-per-item", 1);
     config.set("mail.return-after-hours", "oops");
+    assertThrows(IllegalArgumentException.class, () -> ConfigValidation.validate(config));
+  }
+
+  @Test
+  void shippedConfigurationParsesAndNewSafetyBooleansAreTyped() throws Exception {
+    try (var stream = getClass().getResourceAsStream("/config.yml")) {
+      assertNotNull(stream);
+      YamlConfiguration shipped =
+          YamlConfiguration.loadConfiguration(
+              new InputStreamReader(stream, StandardCharsets.UTF_8));
+      assertDoesNotThrow(() -> ConfigValidation.validate(shipped));
+      assertEquals(
+          "minecraft:block.note_block.pling",
+          shipped.getString("sounds.package-send.sound"));
+    }
+    config.set("notifications.join-mail.enabled", "yes");
     assertThrows(IllegalArgumentException.class, () -> ConfigValidation.validate(config));
   }
 }

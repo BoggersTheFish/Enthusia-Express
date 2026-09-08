@@ -5,6 +5,8 @@ import io.enthusia.express.hook.CombatLogXHook;
 import io.enthusia.express.util.ItemCodec;
 import io.enthusia.express.util.MainThread;
 import io.enthusia.express.util.Text;
+import io.enthusia.express.util.SoundFeedback;
+import io.enthusia.express.util.SoundFeedback.Cue;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import org.bukkit.Bukkit;
@@ -23,13 +25,24 @@ public final class BookMailService {
   private final MainThread main;
   private final Set<UUID> pending = new HashSet<>();
   private final Map<UUID, Long> lastSent = new HashMap<>();
+  private final SoundFeedback sounds;
 
   public BookMailService(
       JavaPlugin plugin, MailRepository repository, CombatLogXHook combat, MainThread main) {
+    this(plugin, repository, combat, main, new SoundFeedback(plugin));
+  }
+
+  public BookMailService(
+      JavaPlugin plugin,
+      MailRepository repository,
+      CombatLogXHook combat,
+      MainThread main,
+      SoundFeedback sounds) {
     this.plugin = plugin;
     this.repository = repository;
     this.combat = combat;
     this.main = main;
+    this.sounds = sounds;
   }
 
   public void send(Player player, OfflinePlayer target, boolean announcement, boolean broadcast) {
@@ -94,18 +107,35 @@ public final class BookMailService {
       result = repository.announce(player.getUniqueId(), player.getName(), recipients, payload);
     } else {
       if (target == null) return;
-      result =
-          repository
-              .insertMail(
-                  player.getUniqueId(),
-                  player.getName(),
-                  target.getUniqueId(),
-                  Objects.requireNonNullElse(target.getName(), target.getUniqueId().toString()),
-                  announcement ? MailType.ANNOUNCEMENT : MailType.LETTER,
-                  payload,
-                  0,
-                  false)
-              .thenApply(id -> 1);
+      if (announcement) {
+        result =
+            repository
+                .insertMail(
+                    player.getUniqueId(),
+                    player.getName(),
+                    target.getUniqueId(),
+                    Objects.requireNonNullElse(target.getName(), target.getUniqueId().toString()),
+                    MailType.ANNOUNCEMENT,
+                    payload,
+                    0,
+                    false)
+                .thenApply(id -> 1);
+      } else {
+        result =
+            repository
+                .insertMailLimited(
+                    player.getUniqueId(),
+                    player.getName(),
+                    target.getUniqueId(),
+                    Objects.requireNonNullElse(target.getName(), target.getUniqueId().toString()),
+                    MailType.LETTER,
+                    payload,
+                    0,
+                    plugin
+                        .getConfig()
+                        .getBoolean("mail.limits.one-outstanding-letter-per-recipient", false))
+                .thenApply(id -> id.isPresent() ? 1 : 0);
+      }
     }
     pending.add(player.getUniqueId());
     main.complete(
@@ -115,10 +145,13 @@ public final class BookMailService {
           if (error != null) {
             plugin.getLogger().severe("Book delivery failed: " + error);
             player.sendMessage(Text.msg(plugin.getConfig(), "database-error"));
+          } else if (count == 0 && !announcement) {
+            player.sendMessage(Text.msg(plugin.getConfig(), "outstanding-letter"));
           } else {
             lastSent.put(player.getUniqueId(), System.currentTimeMillis());
             player.sendMessage(
                 Text.msg(plugin.getConfig(), "book-sent", Map.of("count", count.toString())));
+            if (!announcement) sounds.play(player, Cue.LETTER_SEND);
           }
         });
   }

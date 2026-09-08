@@ -24,6 +24,19 @@ public final class GuiListener implements Listener {
       boolean normal = event.getClick() == ClickType.LEFT || event.getClick() == ClickType.RIGHT;
       boolean allowedSlot = raw == ShippingService.PACKAGE_SLOT || raw >= top.getSize();
       event.setCancelled(!normal || !allowedSlot);
+      if (normal
+          && raw == ShippingService.PACKAGE_SLOT
+          && shipping.isPlaceholder(event.getCurrentItem())) {
+        event.setCancelled(true);
+        if (event.getCursor() != null
+            && !event.getCursor().getType().isAir()
+            && !shipping.isPlaceholder(event.getCursor())) {
+          top.setItem(ShippingService.PACKAGE_SLOT, event.getCursor().clone());
+          event.setCursor(null);
+        }
+      } else if (normal && raw == ShippingService.PACKAGE_SLOT) {
+        shipping.deferPlaceholderRefresh(player, top);
+      }
       if (normal && raw == ShippingService.CANCEL_SLOT) shipping.defer(player, top, false);
       if (normal && raw == ShippingService.CONFIRM_SLOT) shipping.defer(player, top, true);
     } else if (mailbox.owns(player)) {
@@ -40,8 +53,7 @@ public final class GuiListener implements Listener {
     if (mailbox.owns(player) && event.getRawSlots().stream().anyMatch(slot -> slot < top.getSize()))
       event.setCancelled(true);
     if (shipping.owns(player, top)
-        && event.getRawSlots().stream()
-            .anyMatch(slot -> slot < top.getSize() && slot != ShippingService.PACKAGE_SLOT))
+        && event.getRawSlots().stream().anyMatch(slot -> slot < top.getSize()))
       event.setCancelled(true);
   }
 

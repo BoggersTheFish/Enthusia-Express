@@ -1,6 +1,7 @@
 package io.enthusia.express.db;
 
 import io.enthusia.express.mail.MailRecord;
+import io.enthusia.express.mail.MailSummary;
 import io.enthusia.express.mail.MailStatus;
 import io.enthusia.express.mail.MailType;
 import java.io.File;
@@ -8,6 +9,7 @@ import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.OptionalLong;
 import java.util.concurrent.*;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -107,6 +109,81 @@ public final class MailRepository {
         () ->
             insert(
                 sender, senderName, recipient, recipientName, type, copy, packedCount, returned));
+  }
+
+  /**
+   * Atomically checks semantic outstandingness and inserts on the same SQLite write lock.
+   * An empty result means the configured cardinality constraint rejected the proposal.
+   */
+  public CompletableFuture<OptionalLong> insertMailLimited(
+      UUID sender,
+      String senderName,
+      UUID recipient,
+      String recipientName,
+      MailType type,
+      byte[] payload,
+      int packedCount,
+      boolean enforceLimit) {
+    if (type == MailType.ANNOUNCEMENT)
+      return CompletableFuture.failedFuture(
+          new IllegalArgumentException("Announcements do not use outstanding-mail limits"));
+    byte[] copy = payload.clone();
+    return supply(
+        () -> {
+          if (!enforceLimit)
+            return OptionalLong.of(
+                insert(sender, senderName, recipient, recipientName, type, copy, packedCount, false));
+          try (Statement transaction = connection.createStatement()) {
+            transaction.execute("BEGIN IMMEDIATE");
+            try {
+              if (hasOutstanding(sender, recipient, type)) {
+                transaction.execute("ROLLBACK");
+                return OptionalLong.empty();
+              }
+              long id =
+                  insert(sender, senderName, recipient, recipientName, type, copy, packedCount, false);
+              transaction.execute("COMMIT");
+              return OptionalLong.of(id);
+            } catch (Exception error) {
+              transaction.execute("ROLLBACK");
+              throw error;
+            }
+          }
+        });
+  }
+
+  private boolean hasOutstanding(UUID sender, UUID recipient, MailType type) throws SQLException {
+    String sql =
+        "SELECT 1 FROM mail WHERE sender_uuid=? AND recipient_uuid=? AND type=?"
+            + " AND status='UNCLAIMED' AND (?='PACKAGE' OR unread=1) LIMIT 1";
+    try (PreparedStatement ps = connection.prepareStatement(sql)) {
+      ps.setString(1, sender.toString());
+      ps.setString(2, recipient.toString());
+      ps.setString(3, type.name());
+      ps.setString(4, type.name());
+      try (ResultSet rs = ps.executeQuery()) {
+        return rs.next();
+      }
+    }
+  }
+
+  public CompletableFuture<MailSummary> pendingMail(UUID recipient) {
+    return supply(
+        () -> {
+          String sql =
+              "SELECT"
+                  + " SUM(CASE WHEN type='PACKAGE' AND status IN ('UNCLAIMED','RETURNED') THEN 1 ELSE 0 END),"
+                  + " SUM(CASE WHEN type='LETTER' AND status='UNCLAIMED' AND unread=1 THEN 1 ELSE 0 END),"
+                  + " SUM(CASE WHEN type='ANNOUNCEMENT' AND status='UNCLAIMED' AND unread=1 THEN 1 ELSE 0 END)"
+                  + " FROM mail WHERE recipient_uuid=?";
+          try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, recipient.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+              if (!rs.next()) return new MailSummary(0, 0, 0);
+              return new MailSummary(rs.getInt(1), rs.getInt(2), rs.getInt(3));
+            }
+          }
+        });
   }
 
   private long insert(

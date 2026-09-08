@@ -8,6 +8,12 @@ mail:
   require-combatlogx: true
   raw-gold-per-item: 1
   max-recursive-container-depth: 8
+  limits:
+    # Scope is per sender + recipient + type. Other senders and recipients are independent.
+    # A package stops blocking after claim, return or purge.
+    one-outstanding-package-per-recipient: false
+    # A retained letter stops blocking as soon as it is read. Announcements are never limited.
+    one-outstanding-letter-per-recipient: false
 letters:
   enabled: true
   max-pages: 50
@@ -16,6 +22,32 @@ letters:
 announcements:
   enabled: true
   cooldown-seconds: 10
+notifications:
+  join-mail:
+    # Counts claimable packages and unread letters/announcements without blocking the join event.
+    # No message is sent for zero mail or when the joining session disconnects before completion.
+    enabled: true
+sounds:
+  # Success sounds play after the authoritative database/delivery transition, never before it.
+  # Invalid individual settings disable only that cue and produce one server-log warning.
+  # Names must be namespaced; volume >= 0; pitch must be between 0.5 and 2.0.
+  enabled: true
+  package-send:
+    sound: "minecraft:block.note_block.pling"
+    volume: 1.0
+    pitch: 1.0
+  package-claim:
+    sound: "minecraft:entity.item.pickup"
+    volume: 1.0
+    pitch: 1.0
+  letter-send:
+    sound: "minecraft:item.book.page_turn"
+    volume: 1.0
+    pitch: 1.0
+  letter-open:
+    sound: "minecraft:item.book.page_turn"
+    volume: 1.0
+    pitch: 1.0
 messages:
   prefix: "&6[Enthusia Express]&r "
   target-online: "&cThat player is online. Trade with them in person."
@@ -29,6 +61,9 @@ messages:
   empty-container: "&cThat container is empty."
   insufficient-gold: "&cYou need {cost} Raw Gold, but only have {have}."
   package-sent: "&aPackage sent to {target} for {cost} Raw Gold ({items} packed items)."
+  outstanding-package: "&eYou already have an unresolved package for that recipient. Your package and fee were refunded."
+  outstanding-letter: "&eThat recipient still has an unread letter from you."
+  join-mail: "&eYou have mail: {packages} package(s), {letters} letter(s), {announcements} announcement(s). Use /mail inbox."
   mailbox-empty: "&7No mail on this page."
   hold-signed-book: "&cHold a signed written book in your main hand. A copy will be sent."
   book-too-large: "&cThat book exceeds the configured page or payload limit."
