@@ -3,7 +3,10 @@ package io.enthusia.express;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import io.enthusia.express.db.MailRepository;
 import io.enthusia.express.gui.*;
+import io.enthusia.express.hook.CombatLogXHook;
+import io.enthusia.express.util.MainThread;
 import io.enthusia.express.util.ContainerScanner;
 import java.util.*;
 import org.bukkit.Material;
@@ -202,9 +205,9 @@ class InventorySafetyTest {
     ShippingService service =
         new ShippingService(
             plugin,
-            mock(io.enthusia.express.db.MailRepository.class),
-            mock(io.enthusia.express.hook.CombatLogXHook.class),
-            mock(io.enthusia.express.util.MainThread.class));
+            mock(MailRepository.class),
+            mock(CombatLogXHook.class),
+            mock(MainThread.class));
     ItemStack pane = mock(ItemStack.class);
     ItemMeta meta = mock(ItemMeta.class);
     PersistentDataContainer pdc = mock(PersistentDataContainer.class);
