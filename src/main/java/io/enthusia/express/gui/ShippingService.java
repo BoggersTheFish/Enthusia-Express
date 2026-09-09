@@ -200,21 +200,11 @@ public final class ShippingService {
           pending.remove(sender.getUniqueId());
           if (error != null) {
             // Compensate on the server thread; use the current session after a reconnect.
-            Player refundTarget =
-                Optional.ofNullable(Bukkit.getPlayer(sender.getUniqueId())).orElse(sender);
-            give(refundTarget, payloadItem);
-            for (int remaining = cost; remaining > 0; remaining -= Math.min(64, remaining))
-              give(refundTarget, new ItemStack(Material.RAW_GOLD, Math.min(64, remaining)));
-            if (!refundTarget.isOnline()) refundTarget.saveData();
+            refundPlayer(sender, payloadItem, cost);
             sender.sendMessage("\u00a7cShipment failed; your package and fee were refunded.");
             plugin.getLogger().severe("Package insert failed: " + error.getMessage());
           } else if (result.isEmpty()) {
-            Player refundTarget =
-                Optional.ofNullable(Bukkit.getPlayer(sender.getUniqueId())).orElse(sender);
-            give(refundTarget, payloadItem);
-            for (int remaining = cost; remaining > 0; remaining -= Math.min(64, remaining))
-              give(refundTarget, new ItemStack(Material.RAW_GOLD, Math.min(64, remaining)));
-            if (!refundTarget.isOnline()) refundTarget.saveData();
+            refundPlayer(sender, payloadItem, cost);
             sender.sendMessage(Text.msg(plugin.getConfig(), "outstanding-package"));
           } else {
             sender.sendMessage(
@@ -271,6 +261,15 @@ public final class ShippingService {
   public void shutdown() {
     for (Player player : Bukkit.getOnlinePlayers())
       if (inventories.containsKey(player.getUniqueId())) player.closeInventory();
+  }
+
+  private static void refundPlayer(Player sender, ItemStack payloadItem, int cost) {
+    Player refundTarget =
+        Optional.ofNullable(Bukkit.getPlayer(sender.getUniqueId())).orElse(sender);
+    give(refundTarget, payloadItem);
+    for (int remaining = cost; remaining > 0; remaining -= Math.min(64, remaining))
+      give(refundTarget, new ItemStack(Material.RAW_GOLD, Math.min(64, remaining)));
+    if (!refundTarget.isOnline()) refundTarget.saveData();
   }
 
   private static void give(Player player, ItemStack item) {
