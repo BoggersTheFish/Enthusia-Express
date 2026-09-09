@@ -1,5 +1,5 @@
 {
-  "java": "21.0.12.1",
+  "java": "21.0.8",
   "gradle": "8.14.3",
   "paper_compile_versions": [
     "1.21",
@@ -16,23 +16,25 @@
   ],
   "tests": {
     "1.21": {
-      "tests": 58,
+      "tests": 61,
       "failures": 0,
       "errors": 0,
       "skipped": 0
     },
     "1.21.8": {
-      "tests": 58,
+      "tests": 61,
       "failures": 0,
       "errors": 0,
       "skipped": 0
     },
     "1.21.11": {
-      "tests": 58,
+      "tests": 61,
       "failures": 0,
       "errors": 0,
       "skipped": 0
     }
   },
-  "jar_sha256": "648a8e320e16c27da966b7ebeee5ea9e03989059b52acdc39afa93e28f112402"
+  "jar_sha256": "3f082d19ea940e181164d9b00e79ba42f392eee0f8d5db63be25156d86d663c9",
+  "platform": "Windows x86-64",
+  "verified_at": "2026-09-09"
 }
