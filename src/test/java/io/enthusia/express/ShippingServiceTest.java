@@ -107,12 +107,34 @@ class ShippingServiceTest {
     final MockedConstruction<ItemStack> constructed;
     final ShippingService service;
 
-    @SuppressWarnings("unchecked")
     Fixture(OptionalLong result) {
       this(CompletableFuture.completedFuture(result));
     }
 
     Fixture(CompletableFuture<OptionalLong> result) {
+      configureMocks(result);
+
+      bukkit = mockStatic(Bukkit.class);
+      scanner = mockStatic(ContainerScanner.class);
+      codec = mockStatic(ItemCodec.class);
+      configureStaticContext();
+      constructed =
+          mockConstruction(
+              ItemStack.class,
+              (item, context) -> {
+                ItemMeta meta = mock(ItemMeta.class);
+                PersistentDataContainer pdc = mock(PersistentDataContainer.class);
+                when(pdc.has(any(), eq(PersistentDataType.BYTE))).thenReturn(true);
+                when(meta.getPersistentDataContainer()).thenReturn(pdc);
+                when(item.getItemMeta()).thenReturn(meta);
+                when(item.getType()).thenReturn((Material) context.arguments().getFirst());
+              });
+      service = new ShippingService(plugin, repository, combat, main, sounds);
+      service.open(sender, target);
+      when(top.getItem(ShippingService.PACKAGE_SLOT)).thenReturn(packageItem);
+    }
+
+    private void configureMocks(CompletableFuture<OptionalLong> result) {
       YamlConfiguration config = new YamlConfiguration();
       config.set("mail.limits.one-outstanding-package-per-recipient", true);
       when(plugin.getName()).thenReturn("EnthusiaExpress");
@@ -148,30 +170,15 @@ class ShippingServiceTest {
               })
           .when(main)
           .complete(any(), any());
+    }
 
-      bukkit = mockStatic(Bukkit.class);
+    private void configureStaticContext() {
       bukkit.when(() -> Bukkit.createInventory(isNull(), eq(27), anyString())).thenReturn(top);
       bukkit.when(() -> Bukkit.getOfflinePlayer(targetId)).thenReturn(target);
       bukkit.when(() -> Bukkit.getPlayer(senderId)).thenReturn(sender);
-      scanner = mockStatic(ContainerScanner.class);
       scanner.when(() -> ContainerScanner.isAllowedShippingContainer(packageItem)).thenReturn(true);
       scanner.when(() -> ContainerScanner.countPackedItems(packageItem, 8)).thenReturn(2);
-      codec = mockStatic(ItemCodec.class);
       codec.when(() -> ItemCodec.encode(packageItem)).thenReturn(new byte[] {1, 2});
-      constructed =
-          mockConstruction(
-              ItemStack.class,
-              (item, context) -> {
-                ItemMeta meta = mock(ItemMeta.class);
-                PersistentDataContainer pdc = mock(PersistentDataContainer.class);
-                when(pdc.has(any(), eq(PersistentDataType.BYTE))).thenReturn(true);
-                when(meta.getPersistentDataContainer()).thenReturn(pdc);
-                when(item.getItemMeta()).thenReturn(meta);
-                when(item.getType()).thenReturn((Material) context.arguments().getFirst());
-              });
-      service = new ShippingService(plugin, repository, combat, main, sounds);
-      service.open(sender, target);
-      when(top.getItem(ShippingService.PACKAGE_SLOT)).thenReturn(packageItem);
     }
 
     void confirm() {
