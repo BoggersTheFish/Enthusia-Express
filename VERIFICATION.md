@@ -1,18 +1,18 @@
 # Enthusia Express 1.1.0 — verification
 
-Verified 2026-09-08 on Linux x86-64 with Temurin Java 21.0.12.1 and Gradle 8.14.3.
+Verified 2026-09-09 on Windows x86-64 with Azul Zulu Java 21.0.8 and Gradle 8.14.3. This rerun includes all three SQLite rollback recovery regressions.
 
 ## Results
 
 | Check | Result |
 | --- | --- |
-| Included wrapper: `bash ./gradlew clean build --no-daemon --console=plain` | **PASS** — clean release build, baseline Paper 1.21 API |
-| Automated tests with Paper 1.21 API | **58 passed**, 0 failed, 0 skipped |
-| Automated tests with Paper 1.21.8 API | **58 passed**, 0 failed, 0 skipped |
-| Automated tests with Paper 1.21.11 API | **58 passed**, 0 failed, 0 skipped |
+| Included wrapper: `gradlew.bat --no-daemon --offline clean build verifyPaperCompatibility` | **PASS** — clean release build, baseline Paper 1.21 API |
+| Automated tests with Paper 1.21 API | **61 passed**, 0 failed, 0 skipped |
+| Automated tests with Paper 1.21.8 API | **61 passed**, 0 failed, 0 skipped |
+| Automated tests with Paper 1.21.11 API | **61 passed**, 0 failed, 0 skipped |
 | `verifyPaperCompatibility` | **PASS** — all 11 API configurations compiled |
 | CombatLogX published API | **PASS** — reflection hook exercised with the real 11.7-SNAPSHOT API interfaces and core 2.9-SNAPSHOT |
-| Shaded SQLite JDBC 3.50.3.0 | **PASS** — isolated classloader loads the driver from the distributable JAR, creates a real SQLite database and reads/writes it using its native Linux library |
+| Shaded SQLite JDBC 3.50.3.0 | **PASS** — isolated classloader loads the driver from the distributable JAR, creates a real SQLite database and reads/writes it using its native Windows library |
 | Plugin class bytecode | **PASS** — Java 21 (class version 65), `api-version: '1.21'` |
 
 The compile matrix covers **1.21, 1.21.1, 1.21.3, 1.21.4, 1.21.5, 1.21.6, 1.21.7, 1.21.8, 1.21.9, 1.21.10, 1.21.11**. Paper's Maven repository returned 404 for the 1.21.2 API metadata, so no 1.21.2 result is claimed. Compiling every source with each API verifies source/API compatibility. The three test runs exercise those API classpaths with mocked Bukkit players and inventories; they are not live Minecraft server sessions.
@@ -33,7 +33,7 @@ The compile matrix covers **1.21, 1.21.1, 1.21.3, 1.21.4, 1.21.5, 1.21.6, 1.21.7
 
 ## What the tests exercise
 
-**Database (17 tests):** WAL persistence across reopen; 250 concurrent inserts; 100 simultaneous claims with one winner; claims through two independent connections; 50 claim/expiration races; wrong-recipient rejection; exact return-cutoff behavior; RTS recipient reassignment; return claim versus purge; one-way return/purge with payload erasure; text read/retention without RTS; transactional broadcast rollback and independent unread state; stable pagination of 100 messages; shutdown draining; restoration preserving the original expiration timestamp; real SQLite writer contention; atomic outstanding limits across competing connections; disabled-limit multiplicity; type/recipient independence; read-letter release; resolved package states; and pending-summary semantics.
+**Database (20 tests):** WAL persistence across reopen; 250 concurrent inserts; 100 simultaneous claims with one winner; claims through two independent connections; 50 claim/expiration races; wrong-recipient rejection; exact return-cutoff behavior; RTS recipient reassignment; return claim versus purge; one-way return/purge with payload erasure; text read/retention without RTS; transactional broadcast rollback and independent unread state; stable pagination of 100 messages; shutdown draining; restoration preserving the original expiration timestamp; real SQLite writer contention; atomic outstanding limits across competing connections; disabled-limit multiplicity; type/recipient independence; read-letter release; resolved package states; and pending-summary semantics. Three recovery regressions force SQLite to roll back limited sends, announcements, and expiry; they verify the original failure survives and later transactions succeed.
 
 **Combat/configuration (7 tests):** required/optional missing and disabled dependency behavior; safe/tagged players; missing methods; null managers; invocation failure; actual published API method compatibility; rejection of unsafe numeric or mistyped boolean configuration; and parsing/validation of the shipped default YAML.
 
@@ -51,7 +51,7 @@ The Java compiler resolved calls, constructors and method references across all 
 
 ## Practical limits
 
-No Paper server or game client was launched, and no live CombatLogX installation was available. Actual combat-tag events, grey-pane appearance/click feel, audible sound choices, client-side book rendering, real ItemStack/PDC/container round trips, join timing, server restart with player inventories, and plugin interactions remain **unverified in a live environment**. The tests use real SQLite and real API dependencies, with mocks for Bukkit runtime objects. Linux SQLite native loading is automated-verified; other operating-system native loading was not rerun in this session.
+No Paper server or game client was launched, and no live CombatLogX installation was available. Actual combat-tag events, grey-pane appearance/click feel, audible sound choices, client-side book rendering, real ItemStack/PDC/container round trips, join timing, server restart with player inventories, and plugin interactions remain **unverified in a live environment**. The tests use real SQLite and real API dependencies, with mocks for Bukkit runtime objects. Windows SQLite native loading passed in this rerun; the earlier Linux run remains historical evidence, and other platforms were not rerun.
 
 Inventory files and SQLite cannot commit as one transaction. A forced process kill or power loss between an inventory mutation and its SQL commit can still lose or duplicate items. Normal shutdown and the tested concurrency paths are protected, but this release does not claim crash-atomic, exactly-once delivery. Keep matching world/player/plugin backups, and avoid downgrading item payloads created on newer Minecraft versions.
 
@@ -61,11 +61,11 @@ Some supported Bukkit methods emit deprecation notes, and Mockito emits a JVM in
 
 ## Build environment notes
 
-The host initially provided a Java 21 runtime without `javac`, so a Temurin Java 21 JDK was unpacked into a temporary workspace directory for verification. Gradle used a workspace-local user home because the sandboxed global cache was not writable. Neither environment workaround is embedded in the source. Java 21 and repository network access are normal build prerequisites; Paper and CombatLogX dependencies use upstream snapshot repositories.
+This rerun used a workspace-local Azul Zulu Java 21 JDK and Gradle cache. A temporary drive mapping accommodated the Windows sandbox. No environment workaround is embedded in the plugin. Java 21 and repository network access for uncached dependencies are normal build prerequisites; Paper and CombatLogX dependencies use upstream snapshot repositories.
 
 ## Artifacts and provenance
 
-Install `EnthusiaExpress-1.1.0.jar` (SHA-256 `648a8e320e16c27da966b7ebeee5ea9e03989059b52acdc39afa93e28f112402`). The source, wrapper, tests and configuration are in this repository. Build outputs are generated under `build/`; the release JAR is `build/libs/EnthusiaExpress-1.1.0.jar`. The accompanying `verification-summary.json` records the API matrix, test counts and JAR checksum. JUnit XML and reports are generated under `build/` by the executed verification commands.
+Install `EnthusiaExpress-1.1.0.jar` (SHA-256 `3f082d19ea940e181164d9b00e79ba42f392eee0f8d5db63be25156d86d663c9`). The source, wrapper, tests and configuration are in this repository. Build outputs are generated under `build/`; the release JAR is `build/libs/EnthusiaExpress-1.1.0.jar`. The accompanying `verification-summary.json` records the API matrix, test counts and JAR checksum. JUnit XML and reports are generated under `build/` by the executed verification commands.
 
 Original source archive SHA-256: `2e63bfa89d279903a982489a1617b95f85b6bdda782e77e287a6071ead7f4492`.
 
