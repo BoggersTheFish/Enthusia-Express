@@ -133,28 +133,32 @@ public final class MailRepository {
           if (!enforceLimit)
             return OptionalLong.of(
                 insert(sender, senderName, recipient, recipientName, type, copy, packedCount, false));
-          Exception failure = null;
-          try {
-            connection.setAutoCommit(false);
-            OptionalLong result = hasOutstanding(sender, recipient, type)
-                ? OptionalLong.empty()
-                : OptionalLong.of(insert(sender, senderName, recipient, recipientName,
-                    type, copy, packedCount, false));
-            connection.commit();
-            return result;
-          } catch (Exception error) {
-            failure = error;
-            try {
-              connection.rollback();
-            } catch (SQLException rollbackError) {
-              error.addSuppressed(rollbackError);
-              replaceFailedConnection(error);
-            }
-            throw error;
-          } finally {
-            restoreAutoCommit(failure);
-          }
+          return inTransaction(() -> hasOutstanding(sender, recipient, type)
+              ? OptionalLong.empty()
+              : OptionalLong.of(insert(sender, senderName, recipient, recipientName,
+                  type, copy, packedCount, false)));
         });
+  }
+
+  private <T> T inTransaction(SqlSupplier<T> task) throws Exception {
+    Exception failure = null;
+    try {
+      connection.setAutoCommit(false);
+      T result = task.get();
+      connection.commit();
+      return result;
+    } catch (Exception error) {
+      failure = error;
+      try {
+        connection.rollback();
+      } catch (SQLException rollbackError) {
+        error.addSuppressed(rollbackError);
+        replaceFailedConnection(error);
+      }
+      throw error;
+    } finally {
+      restoreAutoCommit(failure);
+    }
   }
 
   private Connection openConnection() throws SQLException {
@@ -180,7 +184,10 @@ public final class MailRepository {
     try {
       connection.setAutoCommit(true);
     } catch (SQLException resetError) {
-      if (failure == null) throw resetError;
+      if (failure == null) {
+        replaceFailedConnection(resetError);
+        throw resetError;
+      }
       failure.addSuppressed(resetError);
       replaceFailedConnection(failure);
     }
@@ -261,9 +268,7 @@ public final class MailRepository {
     var snapshot = java.util.Map.copyOf(recipients);
     byte[] copy = payload.clone();
     return supply(
-        () -> {
-          connection.setAutoCommit(false);
-          try {
+        () -> inTransaction(() -> {
             for (var recipient : snapshot.entrySet())
               insert(
                   sender,
@@ -274,15 +279,8 @@ public final class MailRepository {
                   copy,
                   0,
                   false);
-            connection.commit();
             return snapshot.size();
-          } catch (Exception e) {
-            connection.rollback();
-            throw e;
-          } finally {
-            connection.setAutoCommit(true);
-          }
-        });
+        }));
   }
 
   public CompletableFuture<List<MailRecord>> listInbox(UUID recipient, MailType type) {
@@ -395,9 +393,7 @@ public final class MailRepository {
   public CompletableFuture<Integer> expire(
       long now, long returnCutoff, long purgeCutoff, long textCutoff) {
     return supply(
-        () -> {
-          connection.setAutoCommit(false);
-          try {
+        () -> inTransaction(() -> {
             int changed;
             try (PreparedStatement ps =
                 connection.prepareStatement(
@@ -421,15 +417,8 @@ public final class MailRepository {
               ps.setLong(2, returnCutoff);
               changed += ps.executeUpdate();
             }
-            connection.commit();
             return changed;
-          } catch (Exception e) {
-            connection.rollback();
-            throw e;
-          } finally {
-            connection.setAutoCommit(true);
-          }
-        });
+        }));
   }
 
   private MailRecord read(ResultSet rs) throws SQLException {
