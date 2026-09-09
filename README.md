@@ -44,7 +44,7 @@ Always rebuild with no `paperVersion` override for the release artifact. `verify
 2. Run Paper 1.21.x with Java 21. Install CombatLogX and its own required dependencies when combat protection is required.
 3. Restart the server. Review `plugins/EnthusiaExpress/config.yml` and restart after edits.
 
-Existing `mail.db` rows and package byte payloads remain supported; no destructive schema migration is performed. Existing configuration files are preserved. Missing new keys use the defaults below; add them to your existing file if you want to customize them. Invalid numeric ranges or boolean values fail startup instead of silently weakening protection.
+Existing `mail.db` rows and package byte payloads remain supported; no destructive schema migration is performed. Existing configuration files are preserved. Missing new keys use the defaults below; add them to your existing file if you want to customize them. Invalid boolean values and invalid ranges for core mail settings fail startup. Invalid sound cue settings disable only the affected cue and log a warning.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
