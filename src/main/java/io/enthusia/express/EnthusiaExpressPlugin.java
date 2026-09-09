@@ -6,6 +6,7 @@ import io.enthusia.express.gui.GuiListener;
 import io.enthusia.express.gui.MailboxService;
 import io.enthusia.express.gui.ShippingService;
 import io.enthusia.express.hook.CombatLogXHook;
+import io.enthusia.express.mail.BookMailService;
 import io.enthusia.express.mail.ExpirationService;
 import io.enthusia.express.mail.JoinNotificationService;
 import io.enthusia.express.util.SoundFeedback;
@@ -42,8 +43,7 @@ public final class EnthusiaExpressPlugin extends JavaPlugin {
             shippingService,
             mailboxService,
             combatHook,
-            new io.enthusia.express.mail.BookMailService(
-                this, repository, combatHook, main, sounds));
+            new BookMailService(this, repository, combatHook, main, sounds));
     Objects.requireNonNull(getCommand("mail")).setExecutor(command);
     Objects.requireNonNull(getCommand("mail")).setTabCompleter(command);
     Bukkit.getPluginManager()
