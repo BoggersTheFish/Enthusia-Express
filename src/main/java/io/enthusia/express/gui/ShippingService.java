@@ -53,7 +53,7 @@ public final class ShippingService {
     this.repository = repository;
     this.combatHook = combatHook;
     this.sounds = sounds;
-    this.placeholderKey = new NamespacedKey("enthusiaexpress", "shipping-placeholder");
+    this.placeholderKey = new NamespacedKey(plugin, "shipping-placeholder");
   }
 
   public void open(Player sender, OfflinePlayer target) {
