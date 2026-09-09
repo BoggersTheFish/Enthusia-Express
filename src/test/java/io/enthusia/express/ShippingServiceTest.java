@@ -85,7 +85,9 @@ class ShippingServiceTest {
   }
 
   private static final class Fixture implements AutoCloseable {
-    final JavaPlugin plugin = mock(JavaPlugin.class);
+    final JavaPlugin plugin = mock(JavaPlugin.class, invocation ->
+        invocation.getMethod().getName().equals("namespace")
+            ? "enthusiaexpress" : RETURNS_DEFAULTS.answer(invocation));
     final MailRepository repository = mock(MailRepository.class);
     final CombatLogXHook combat = mock(CombatLogXHook.class);
     final MainThread main = mock(MainThread.class);
