@@ -43,7 +43,7 @@ public final class MailRepository {
         () -> {
           java.nio.file.Files.createDirectories(dbFile.getAbsoluteFile().getParentFile().toPath());
           Class.forName("org.sqlite.JDBC");
-          connection = DriverManager.getConnection("jdbc:sqlite:" + dbFile.getAbsolutePath());
+          connection = openConnection();
           try (Statement st = connection.createStatement()) {
             st.execute("PRAGMA busy_timeout=" + busyTimeout);
             st.execute("PRAGMA journal_mode=WAL");
@@ -133,23 +133,57 @@ public final class MailRepository {
           if (!enforceLimit)
             return OptionalLong.of(
                 insert(sender, senderName, recipient, recipientName, type, copy, packedCount, false));
-          try (Statement transaction = connection.createStatement()) {
-            transaction.execute("BEGIN IMMEDIATE");
+          Exception failure = null;
+          try {
+            connection.setAutoCommit(false);
+            OptionalLong result = hasOutstanding(sender, recipient, type)
+                ? OptionalLong.empty()
+                : OptionalLong.of(insert(sender, senderName, recipient, recipientName,
+                    type, copy, packedCount, false));
+            connection.commit();
+            return result;
+          } catch (Exception error) {
+            failure = error;
             try {
-              if (hasOutstanding(sender, recipient, type)) {
-                transaction.execute("ROLLBACK");
-                return OptionalLong.empty();
-              }
-              long id =
-                  insert(sender, senderName, recipient, recipientName, type, copy, packedCount, false);
-              transaction.execute("COMMIT");
-              return OptionalLong.of(id);
-            } catch (Exception error) {
-              transaction.execute("ROLLBACK");
-              throw error;
+              connection.rollback();
+            } catch (SQLException rollbackError) {
+              error.addSuppressed(rollbackError);
+              replaceFailedConnection(error);
             }
+            throw error;
+          } finally {
+            restoreAutoCommit(failure);
           }
         });
+  }
+
+  private Connection openConnection() throws SQLException {
+    org.sqlite.SQLiteConfig config = new org.sqlite.SQLiteConfig();
+    config.setTransactionMode(org.sqlite.SQLiteConfig.TransactionMode.IMMEDIATE);
+    config.setBusyTimeout(busyTimeout);
+    config.setJournalMode(org.sqlite.SQLiteConfig.JournalMode.WAL);
+    config.setSynchronous(org.sqlite.SQLiteConfig.SynchronousMode.FULL);
+    config.enforceForeignKeys(true);
+    return config.createConnection("jdbc:sqlite:" + dbFile.getAbsolutePath());
+  }
+
+  private void replaceFailedConnection(Exception failure) {
+    try {
+      connection.close();
+      connection = openConnection();
+    } catch (SQLException recoveryError) {
+      failure.addSuppressed(recoveryError);
+    }
+  }
+
+  private void restoreAutoCommit(Exception failure) throws SQLException {
+    try {
+      connection.setAutoCommit(true);
+    } catch (SQLException resetError) {
+      if (failure == null) throw resetError;
+      failure.addSuppressed(resetError);
+      replaceFailedConnection(failure);
+    }
   }
 
   private boolean hasOutstanding(UUID sender, UUID recipient, MailType type) throws SQLException {
