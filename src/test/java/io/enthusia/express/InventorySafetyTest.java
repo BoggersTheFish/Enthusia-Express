@@ -200,7 +200,9 @@ class InventorySafetyTest {
 
   @Test
   void placeholderIdentityRequiresPrivatePersistentMarker() {
-    org.bukkit.plugin.java.JavaPlugin plugin = mock(org.bukkit.plugin.java.JavaPlugin.class);
+    org.bukkit.plugin.java.JavaPlugin plugin = mock(org.bukkit.plugin.java.JavaPlugin.class, invocation ->
+        invocation.getMethod().getName().equals("namespace")
+            ? "enthusiaexpress" : RETURNS_DEFAULTS.answer(invocation));
     when(plugin.getName()).thenReturn("EnthusiaExpress");
     ShippingService service =
         new ShippingService(
